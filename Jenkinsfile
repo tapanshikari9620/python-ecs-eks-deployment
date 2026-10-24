@@ -4,29 +4,24 @@ pipeline {
 
     options {
         timestamps()
-        timeout(time: 15, unit: 'MINUTES')
+        timeout(time: 20, unit: 'MINUTES')
     }
 
     environment {
+        AWS_REGION = 'us-east-1'
+        ECR_REPOSITORY = 'devops-ecr-practice'
+        AWS_ACCOUNT_ID = '824939473621'
         IMAGE_NAME = 'python-demo-app'
-        IMAGE_TAG  = "${BUILD_NUMBER}"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        ECR_REGISTRY = '824939473621.dkr.ecr.us-east-1.amazonaws.com'
+        ECR_IMAGE = '824939473621.dkr.ecr.us-east-1.amazonaws.com/devops-ecr-practice'
     }
 
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                sh 'echo "GitHub checkout successful"'
-                sh 'ls -la'
-            }
-        }
-
-        stage('Check Python') {
-            steps {
-                sh '''
-                    python3 --version
-                    python3 -m pip --version
-                '''
+                sh 'echo "Source checkout successful"'
             }
         }
 
@@ -40,11 +35,9 @@ pipeline {
             }
         }
 
-        stage('Run Unit Tests') {
+        stage('Run Tests') {
             steps {
-                sh '''
-                    .venv/bin/python -m pytest -v
-                '''
+                sh '.venv/bin/python -m pytest -v'
             }
         }
 
@@ -52,7 +45,36 @@ pipeline {
             steps {
                 sh '''
                     docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
-                    docker image ls ${IMAGE_NAME}
+                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_IMAGE}:${IMAGE_TAG}
+                '''
+            }
+        }
+
+        stage('Login to ECR') {
+            steps {
+                sh '''
+                    aws ecr get-login-password --region ${AWS_REGION} \
+                      | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                '''
+            }
+        }
+
+        stage('Push Image to ECR') {
+            steps {
+                sh '''
+                    docker push ${ECR_IMAGE}:${IMAGE_TAG}
+                    echo "Image pushed: ${ECR_IMAGE}:${IMAGE_TAG}"
+                '''
+            }
+        }
+
+        stage('Verify Image in ECR') {
+            steps {
+                sh '''
+                    aws ecr describe-images \
+                      --repository-name ${ECR_REPOSITORY} \
+                      --image-ids imageTag=${IMAGE_TAG} \
+                      --region ${AWS_REGION}
                 '''
             }
         }
@@ -60,13 +82,11 @@ pipeline {
 
     post {
         success {
-            echo 'SUCCESS: Tests passed and Docker image was built.'
+            echo 'SUCCESS: Tests passed, Docker image built and pushed to ECR.'
         }
-
         failure {
-            echo 'FAILED: Check the stage logs to identify the issue.'
+            echo 'FAILED: Check Console Output for the failing stage.'
         }
-
         always {
             echo 'Pipeline execution completed.'
         }
